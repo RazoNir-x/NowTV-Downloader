@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NowTV Downloader Pro</title>
+  <meta name="description" content="הורד סדרות שלמות מ-NowTV בקלות">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg-effects">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+  <div class="bg-grid"></div>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-title">ניווט</div>
+      <div class="nav-item active" data-page="download" onclick="switchPage('download')">
+        <span class="icon">⬇️</span> הורדה
+      </div>
+      <div class="nav-item" data-page="library" onclick="switchPage('library')">
+        <span class="icon">📁</span> מאגר
+        <span class="badge" id="libraryBadge" style="display:none">0</span>
+      </div>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-title">סדרות קיימות</div>
+      <div id="sidebarShows"></div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- DOWNLOAD PAGE -->
+      <div class="download-page" id="downloadPage">
+        <div class="page-header">
+          <div class="logo-icon">🎬</div>
+          <div>
+            <div class="page-title">NowTV Downloader</div>
+            <div class="page-subtitle">הורד פרקים וסדרות שלמות מ-NowTV</div>
+          </div>
+        </div>
+
+        <!-- Input Card -->
+        <div class="card" id="inputCard">
+          <div class="card-title">📥 הורדה חדשה</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="urlInput">קישור לפרק (הראשון)</label>
+              <input type="url" id="urlInput" class="form-input"
+                placeholder="https://www.nowtv.com.tr/ShowName/bolum/1"
+                autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group small">
+              <label class="form-label" for="fromEp">מפרק</label>
+              <input type="number" id="fromEp" class="form-input" min="1" value="1">
+            </div>
+            <div class="form-group small">
+              <label class="form-label" for="toEp">עד פרק</label>
+              <input type="number" id="toEp" class="form-input" min="1" value="1">
+            </div>
+            <div class="form-group" style="align-self: flex-end;">
+              <button id="downloadBtn" class="btn btn-primary" onclick="startBatchDownload()">
+                <span class="btn-text">🚀 התחל הורדה</span>
+                <div class="spinner"></div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Batch Progress -->
+        <div id="batchSection" style="display:none;">
+          <div class="batch-progress" id="batchProgressCard">
+            <div class="batch-progress-header">
+              <span class="batch-progress-label" id="batchShowName">מוריד...</span>
+              <span class="batch-progress-count" id="batchCount">0 / 0</span>
+            </div>
+            <div class="batch-progress-bar">
+              <div class="batch-progress-fill" id="batchFill"></div>
+            </div>
+            <div class="timing-stats" id="timingStats">
+              <div class="timing-item">
+                <span class="timing-label">⏱️ זמן שעבר</span>
+                <span class="timing-value" id="timingElapsed">0:00</span>
+              </div>
+              <div class="timing-item">
+                <span class="timing-label">⏳ ETA</span>
+                <span class="timing-value" id="timingEta">--:--</span>
+              </div>
+              <div class="timing-item">
+                <span class="timing-label">📊 ממוצע/פרק</span>
+                <span class="timing-value" id="timingAvg">--:--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Episode Queue -->
+          <div class="card">
+            <div class="card-title">📋 תור הורדות</div>
+            <div class="queue" id="episodeQueue"></div>
+          </div>
+
+          <!-- Console -->
+          <div class="console">
+            <div class="console-header">
+              <div class="console-dots">
+                <span class="console-dot"></span>
+                <span class="console-dot"></span>
+                <span class="console-dot"></span>
+              </div>
+              <span>CONSOLE</span>
+            </div>
+            <div class="console-body" id="consoleBody"></div>
+          </div>
+
+          <!-- Complete Banner -->
+          <div class="complete-banner" id="completeBanner">
+            <div class="icon">🎉</div>
+            <h3 id="completeTitle">הורדה הושלמה!</h3>
+            <p id="completeDetails"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIBRARY PAGE -->
+      <div class="library-page" id="libraryPage">
+        <div class="page-header">
+          <div class="logo-icon">📁</div>
+          <div>
+            <div class="page-title">מאגר הסדרות</div>
+            <div class="page-subtitle" id="librarySubtitle">טוען...</div>
+          </div>
+        </div>
+        <div id="libraryContent"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

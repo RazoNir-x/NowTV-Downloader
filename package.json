@@ -1,0 +1,15 @@
+{
+  "name": "nowtv-downloader",
+  "version": "1.0.0",
+  "description": "NowTV Episode Downloader with beautiful UI",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "puppeteer": "^23.0.0",
+    "uuid": "^10.0.0"
+  }
+}
