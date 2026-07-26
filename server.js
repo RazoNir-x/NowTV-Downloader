@@ -31,18 +31,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 // UTILITIES
 // ─────────────────────────────────────────────
 
-function parseNowTVUrl(url) {
+function parseUrl(url) {
   try {
     const urlObj = new URL(url);
-    const parts = urlObj.pathname.split('/').filter(Boolean);
-    if (parts.length >= 3 && parts[1].toLowerCase() === 'bolum') {
-      return { showName: parts[0], episode: parseInt(parts[2], 10) };
+    if (url.includes('showtv.com.tr')) {
+      const match = urlObj.pathname.match(/\/dizi\/tum_bolumler\/(.*?)(?:-sezon-\d+)?-bolum-(\d+)/i);
+      if (match) return { showName: match[1], episode: parseInt(match[2]), site: 'showtv' };
+      return { showName: 'UnknownShow', episode: 1, site: 'showtv' };
+    } else {
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      if (parts.length >= 3 && parts[1].toLowerCase() === 'bolum') {
+        return { showName: parts[0], episode: parseInt(parts[2], 10), site: 'nowtv' };
+      }
+      const lastPart = parts[parts.length - 1];
+      const num = parseInt(lastPart, 10);
+      return { showName: parts[0] || 'Unknown', episode: isNaN(num) ? 1 : num, site: 'nowtv' };
     }
-    const lastPart = parts[parts.length - 1];
-    const num = parseInt(lastPart, 10);
-    return { showName: parts[0] || 'Unknown', episode: isNaN(num) ? 1 : num };
   } catch (e) {
-    return { showName: 'Unknown', episode: 1 };
+    return { showName: 'Unknown', episode: 1, site: 'unknown' };
   }
 }
 
@@ -146,9 +152,9 @@ async function captureStreamUrls(pageUrl, broadcastFn) {
 
     cdp.on('Network.requestWillBeSent', (params) => {
       const reqUrl = params.request.url;
-      if (reqUrl.includes('playlist.m3u8') && !m3u8Url) {
+      if (reqUrl.includes('.m3u8') && !m3u8Url) {
         m3u8Url = reqUrl;
-        broadcastFn('log', { message: `✅ נמצא וידאו: ...${reqUrl.slice(-60)}` });
+        broadcastFn('log', { message: `✅ נמצא וידאו: ...${reqUrl.split('?')[0].slice(-30)}` });
       }
       if (reqUrl.includes('.vtt') && !vttUrl) {
         vttUrl = reqUrl;
@@ -209,9 +215,12 @@ async function captureStreamUrls(pageUrl, broadcastFn) {
 // DOWNLOAD SINGLE EPISODE
 // ─────────────────────────────────────────────
 
-async function downloadEpisode(m3u8Url, vttUrl, showName, episode, downloadDir, broadcastFn) {
+async function downloadEpisode(m3u8Url, vttUrl, showName, episode, downloadDir, broadcastFn, site = 'nowtv') {
   const epStr = String(episode).padStart(2, '0');
   const videoFilePath = path.join(downloadDir, `${showName}_E${epStr}`);
+
+  const referer = site === 'showtv' ? 'https://www.showtv.com.tr/' : 'https://www.nowtv.com.tr/';
+  const origin = site === 'showtv' ? 'https://www.showtv.com.tr' : 'https://www.nowtv.com.tr';
 
   // Download video with concurrent fragment downloads for speed
   await new Promise((resolve, reject) => {
@@ -219,9 +228,9 @@ async function downloadEpisode(m3u8Url, vttUrl, showName, episode, downloadDir, 
       m3u8Url,
       '-o', `${videoFilePath}.%(ext)s`,
       '--no-check-certificates', '--no-update', '--newline', '--progress',
-      '--concurrent-fragments', '5',
-      '--referer', 'https://www.nowtv.com.tr/',
-      '--add-header', 'Origin: https://www.nowtv.com.tr'
+      '--concurrent-fragments', '10', '--hls-prefer-native',
+      '--referer', referer,
+      '--add-header', `Origin: ${origin}`
     ], { cwd: downloadDir, windowsHide: true });
 
     ytdlp.stdout.on('data', (data) => {
@@ -261,10 +270,12 @@ async function downloadEpisode(m3u8Url, vttUrl, showName, episode, downloadDir, 
 
 app.post('/api/batch', (req, res) => {
   const { url, fromEpisode, toEpisode } = req.body;
-  if (!url || !url.includes('nowtv.com.tr')) return res.status(400).json({ error: 'Invalid URL' });
+  if (!url || (!url.includes('nowtv.com.tr') && !url.includes('showtv.com.tr'))) {
+    return res.status(400).json({ error: 'Invalid URL (only nowtv or showtv supported)' });
+  }
 
-  const { showName } = parseNowTVUrl(url);
-  const from = fromEpisode || parseNowTVUrl(url).episode;
+  const { showName, site, episode } = parseUrl(url);
+  const from = fromEpisode || episode;
   const to = toEpisode || from;
 
   if (to < from) return res.status(400).json({ error: 'End episode must be >= start' });
@@ -277,7 +288,7 @@ app.post('/api/batch', (req, res) => {
   }
 
   const session = {
-    id: sessionId, url, showName, from, to,
+    id: sessionId, url, showName, site, from, to,
     episodes, status: 'pending', listeners: [], logs: []
   };
   batchSessions.set(sessionId, session);
@@ -313,8 +324,83 @@ function broadcast(session, event, data) {
   for (const l of session.listeners) sendSSE(l, event, data);
 }
 
+// ─────────────────────────────────────────────
+// SHOWTV SCRAPER
+// ─────────────────────────────────────────────
+async function scrapeShowTVEpisodes(pageUrl, fromEp, toEp, broadcastFn) {
+  let browser;
+  try {
+    broadcastFn('log', { message: '🌐 מפעיל דפדפן לסריקת פרקים ב-ShowTV...' });
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security']
+    });
+    const page = await browser.newPage();
+    await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+
+    const episodeUrls = new Map(); // ep -> url
+
+    async function extractEpisodes() {
+      return await page.evaluate(() => {
+        const links = document.querySelectorAll('li.iterate a.activePreview');
+        const results = {};
+        for (const a of links) {
+          const href = a.href;
+          const titleEl = a.querySelector('[data-ajax-title]');
+          const title = titleEl ? titleEl.textContent : (a.title || '');
+          let epNum = null;
+          
+          const m1 = title.match(/(\d+)\.\s*Bölüm/i);
+          if (m1) epNum = parseInt(m1[1]);
+          else {
+             const m2 = href.match(/-bolum-(\d+)/i);
+             if (m2) epNum = parseInt(m2[1]);
+          }
+          if (epNum) results[epNum] = href;
+        }
+        return results;
+      });
+    }
+
+    let iterations = 0;
+    while (iterations < 30) {
+      const eps = await extractEpisodes();
+      let foundAll = true;
+      for (let i = fromEp; i <= toEp; i++) {
+        if (eps[i]) {
+          episodeUrls.set(i, eps[i]);
+        } else {
+          foundAll = false;
+        }
+      }
+
+      if (foundAll) break;
+
+      const loadMoreBtn = await page.$('#loadMoreItem');
+      if (loadMoreBtn) {
+        const isHidden = await page.evaluate(b => b.style.display === 'none' || b.offsetParent === null, loadMoreBtn);
+        if (isHidden) break;
+        
+        broadcastFn('log', { message: '🔄 טוען עוד פרקים (DAHA FAZLA GÖSTER)...' });
+        await loadMoreBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+        iterations++;
+      } else {
+        break;
+      }
+    }
+
+    await browser.close();
+    return episodeUrls;
+  } catch (err) {
+    if (browser) await browser.close();
+    broadcastFn('log', { message: `❌ שגיאה בסריקת ShowTV: ${err.message}` });
+    return new Map();
+  }
+}
+
 async function runBatchDownload(session) {
-  const { url, showName, episodes } = session;
+  const { url, showName, site, from, to, episodes } = session;
   const downloadDir = path.join(DOWNLOADS_DIR, showName);
   if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
 
@@ -322,11 +408,11 @@ async function runBatchDownload(session) {
   const totalToDownload = episodes.filter(e => e.status === 'pending').length;
   const skipped = episodes.filter(e => e.status === 'exists').length;
   const batchStartTime = Date.now();
-  const episodeTimes = []; // track ms per completed episode for ETA
+  const episodeTimes = [];
 
   broadcastFn('log', { message: `📂 תיקיית יעד: ${downloadDir}` });
   broadcastFn('log', { message: `📋 ${episodes.length} פרקים, ${skipped} כבר קיימים, ${totalToDownload} להורדה` });
-  broadcastFn('log', { message: `⚡ מצב מהיר: 5 חלקים במקביל + pipeline` });
+  broadcastFn('log', { message: `⚡ מצב מהיר: חלקים במקביל + pipeline` });
   broadcastFn('timing', { elapsed: '0:00', eta: '--:--', avgPerEp: '--:--', downloaded: 0, total: totalToDownload });
 
   let downloadedCount = 0;
@@ -338,6 +424,18 @@ async function runBatchDownload(session) {
       broadcastFn('episode_status', { episode: ep.episode, status: 'exists' });
       broadcastFn('log', { message: `⏭️ פרק ${ep.episode} כבר קיים — דילוג` });
     }
+  }
+
+  // Pre-flight: Resolve URLs for ShowTV
+  let resolvedUrls = new Map();
+  if (site === 'showtv' && pendingEpisodes.length > 0) {
+     resolvedUrls = await scrapeShowTVEpisodes(url, from, to, broadcastFn);
+  }
+
+  // Helper to get exact URL for an episode
+  function getEpisodeUrl(epNum) {
+    if (site === 'showtv') return resolvedUrls.get(epNum) || null;
+    return buildEpisodeUrl(url, epNum);
   }
 
   // PIPELINE: capture next episode's URLs while current one downloads
@@ -360,34 +458,39 @@ async function runBatchDownload(session) {
       ({ m3u8Url, vttUrl } = prefetchedUrls);
       prefetchedUrls = null;
     } else {
-      const pageUrl = buildEpisodeUrl(url, ep.episode);
-      broadcastFn('log', { message: `🔍 מחפש וידאו עבור פרק ${ep.episode}...` });
-      ({ m3u8Url, vttUrl } = await captureStreamUrls(pageUrl, broadcastFn));
+      const pageUrl = getEpisodeUrl(ep.episode);
+      if (!pageUrl) {
+         m3u8Url = null;
+      } else {
+         broadcastFn('log', { message: `🔍 מחפש וידאו עבור פרק ${ep.episode}...` });
+         ({ m3u8Url, vttUrl } = await captureStreamUrls(pageUrl, broadcastFn));
+      }
     }
 
     if (!m3u8Url) {
       ep.status = 'error';
       broadcastFn('episode_status', { episode: ep.episode, status: 'error' });
-      broadcastFn('log', { message: `❌ פרק ${ep.episode}: לא נמצא וידאו` });
+      broadcastFn('log', { message: `❌ פרק ${ep.episode}: לא נמצא וידאו (אולי הקישור חסר בעמוד)` });
       prefetchedUrls = null;
       continue;
     }
 
     // Start prefetching NEXT episode's URLs in parallel with current download
     if (nextEp) {
-      const nextPageUrl = buildEpisodeUrl(url, nextEp.episode);
-      broadcastFn('log', { message: `🔮 מחפש מראש את פרק ${nextEp.episode} במקביל...` });
-      // Silent broadcast for prefetch (don't flood the log)
-      const silentBroadcast = (event, data) => {
-        if (event === 'log' && !data.message.includes('✅')) return; // only show found messages
-        broadcastFn(event, data);
-      };
-      prefetchPromise = captureStreamUrls(nextPageUrl, silentBroadcast);
+      const nextPageUrl = getEpisodeUrl(nextEp.episode);
+      if (nextPageUrl) {
+        broadcastFn('log', { message: `🔮 מחפש מראש את פרק ${nextEp.episode} במקביל...` });
+        const silentBroadcast = (event, data) => {
+          if (event === 'log' && !data.message.includes('✅')) return;
+          broadcastFn(event, data);
+        };
+        prefetchPromise = captureStreamUrls(nextPageUrl, silentBroadcast);
+      }
     }
 
     // Download current episode
     broadcastFn('log', { message: `📥 מוריד פרק ${ep.episode}...` });
-    await downloadEpisode(m3u8Url, vttUrl, showName, ep.episode, downloadDir, broadcastFn);
+    await downloadEpisode(m3u8Url, vttUrl, showName, ep.episode, downloadDir, broadcastFn, site);
 
     const epDuration = Date.now() - epStartTime;
     episodeTimes.push(epDuration);
@@ -811,6 +914,227 @@ async function runTranslation(session) {
     totalTime: formatDuration(totalTime)
   });
   bc('log', { message: `\n🎉 תרגום הושלם! ${translated} קבצים ב-${formatDuration(totalTime)}` });
+}
+
+// ─────────────────────────────────────────────
+// FIX ENCODING ENGINE (FFmpeg copy & rename)
+// ─────────────────────────────────────────────
+
+function getFFmpegPath() {
+  const customPath = 'C:\\Users\\RWS\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.2-full_build\\bin\\ffmpeg.exe';
+  if (fs.existsSync(customPath)) return customPath;
+  return 'ffmpeg';
+}
+
+function getShortEpisodeName(filename) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+
+  const m1 = base.match(/(?:_|^)(E\d+)/i);
+  if (m1) return m1[1].toUpperCase() + '.mp4';
+
+  const m2 = base.match(/(?:_|^)(\d+)/);
+  if (m2) return 'E' + m2[1].padStart(2, '0') + '.mp4';
+
+  return base + '.mp4';
+}
+
+const fixEncodingSessions = new Map();
+
+app.post('/api/fix-encoding', (req, res) => {
+  const { showName } = req.body;
+  if (!showName) return res.status(400).json({ error: 'Missing showName' });
+
+  const showDir = path.join(DOWNLOADS_DIR, showName);
+  if (!fs.existsSync(showDir)) return res.status(404).json({ error: 'Show not found' });
+
+  const videoFiles = [];
+  function scanDir(dir) {
+    try {
+      const items = fs.readdirSync(dir);
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          scanDir(fullPath);
+        } else {
+          const ext = path.extname(item).toLowerCase();
+          if (['.mp4', '.mkv', '.ts', '.avi', '.webm'].includes(ext)) {
+            const oldBase = path.basename(item, ext);
+            const targetVideoName = getShortEpisodeName(item);
+            const targetVideoPath = path.join(dir, targetVideoName);
+            const relativePath = path.relative(showDir, fullPath);
+            const targetRelativePath = path.relative(showDir, targetVideoPath);
+
+            // Find matching subtitles in same directory
+            const matchingSubs = [];
+            for (const subItem of items) {
+              const subExt = path.extname(subItem).toLowerCase();
+              if (['.txt', '.vtt'].includes(subExt)) {
+                const subBase = path.basename(subItem, subExt);
+                if (subBase === oldBase || subBase.startsWith(oldBase)) {
+                  const targetSubName = path.basename(targetVideoName, '.mp4') + subExt;
+                  matchingSubs.push({
+                    srcPath: path.join(dir, subItem),
+                    targetPath: path.join(dir, targetSubName),
+                    srcName: subItem,
+                    targetName: targetSubName
+                  });
+                }
+              }
+            }
+
+            videoFiles.push({
+              srcPath: fullPath,
+              targetPath: targetVideoPath,
+              srcName: item,
+              targetName: targetVideoName,
+              relativePath,
+              targetRelativePath,
+              dir,
+              matchingSubs
+            });
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  scanDir(showDir);
+
+  const sessionId = uuidv4();
+  const session = {
+    id: sessionId, showName, files: videoFiles,
+    status: 'pending', listeners: [], logs: []
+  };
+  fixEncodingSessions.set(sessionId, session);
+
+  res.json({
+    sessionId,
+    totalFiles: videoFiles.length,
+    files: videoFiles.map(f => ({
+      name: f.srcName,
+      targetName: f.targetName,
+      relativePath: f.relativePath,
+      targetRelativePath: f.targetRelativePath,
+      subsCount: f.matchingSubs.length
+    }))
+  });
+});
+
+app.get('/api/fix-encoding/progress/:id', (req, res) => {
+  const session = fixEncodingSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Not found' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  sendSSE(res, 'init', {
+    showName: session.showName,
+    totalFiles: session.files.length
+  });
+  for (const log of session.logs) sendSSE(res, log.event, log.data);
+
+  session.listeners.push(res);
+  req.on('close', () => { session.listeners = session.listeners.filter(l => l !== res); });
+
+  if (session.status === 'pending') {
+    session.status = 'running';
+    runFixEncoding(session);
+  }
+});
+
+function broadcastFixEncoding(session, event, data) {
+  session.logs.push({ event, data });
+  for (const l of session.listeners) sendSSE(l, event, data);
+}
+
+async function runFixEncoding(session) {
+  const { files, showName } = session;
+  const bc = (event, data) => broadcastFixEncoding(session, event, data);
+  const ffmpegExe = getFFmpegPath();
+  const startTime = Date.now();
+  let completed = 0;
+
+  bc('log', { message: `🔧 מתחיל תיקון קידוד עבור ${showName}` });
+  bc('log', { message: `📋 ${files.length} קבצי וידאו לסידור ותיקון` });
+
+  for (const file of files) {
+    bc('file_status', { file: file.relativePath, status: 'processing' });
+    bc('log', { message: `\n━━━ ${file.srcName} ➔ ${file.targetName} ━━━` });
+    const fileStart = Date.now();
+
+    const tempPath = path.join(file.dir, `_temp_${uuidv4().substring(0, 8)}.mp4`);
+
+    try {
+      // Run FFmpeg stream copy
+      await new Promise((resolve, reject) => {
+        const proc = spawn(ffmpegExe, [
+          '-y',
+          '-i', file.srcPath,
+          '-c', 'copy',
+          tempPath
+        ], { windowsHide: true });
+
+        let stderr = '';
+        proc.stderr.on('data', d => { stderr += d.toString(); });
+        proc.on('close', code => {
+          if (code === 0 && fs.existsSync(tempPath) && fs.statSync(tempPath).size > 0) {
+            resolve();
+          } else {
+            reject(new Error(`FFmpeg error (code ${code}): ${stderr.slice(-200)}`));
+          }
+        });
+        proc.on('error', reject);
+      });
+
+      // Replace old video file with fixed video file
+      if (fs.existsSync(file.srcPath)) {
+        fs.unlinkSync(file.srcPath);
+      }
+      if (fs.existsSync(file.targetPath) && file.targetPath !== file.srcPath) {
+        fs.unlinkSync(file.targetPath);
+      }
+      fs.renameSync(tempPath, file.targetPath);
+
+      // Rename subtitles
+      for (const sub of file.matchingSubs) {
+        if (fs.existsSync(sub.srcPath) && sub.srcPath !== sub.targetPath) {
+          if (fs.existsSync(sub.targetPath)) fs.unlinkSync(sub.targetPath);
+          fs.renameSync(sub.srcPath, sub.targetPath);
+          bc('log', { message: `  📄 תרגום שונה: ${sub.srcName} ➔ ${sub.targetName}` });
+        }
+      }
+
+      const duration = Date.now() - fileStart;
+      completed++;
+      bc('file_status', { file: file.relativePath, status: 'complete' });
+      bc('log', { message: `✅ ${file.targetName} תוקן בהצלחה! (${formatDuration(duration)})` });
+      bc('fix_batch_progress', {
+        completed,
+        total: files.length,
+        elapsed: formatDuration(Date.now() - startTime)
+      });
+    } catch (err) {
+      if (fs.existsSync(tempPath)) try { fs.unlinkSync(tempPath); } catch (e) {}
+      bc('file_status', { file: file.relativePath, status: 'error' });
+      bc('log', { message: `❌ ${file.srcName}: ${err.message}` });
+    }
+
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  const totalTime = Date.now() - startTime;
+  session.status = 'complete';
+  bc('fix_complete', {
+    showName,
+    completed,
+    total: files.length,
+    totalTime: formatDuration(totalTime)
+  });
+  bc('log', { message: `\n🎉 תיקון הקידוד הושלם! ${completed}/${files.length} קבצים ב-${formatDuration(totalTime)}` });
 }
 
 // ─────────────────────────────────────────────
