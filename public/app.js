@@ -16,6 +16,7 @@ const completeTitle = document.getElementById('completeTitle');
 const completeDetails = document.getElementById('completeDetails');
 const libraryPage = document.getElementById('libraryPage');
 const downloadPage = document.getElementById('downloadPage');
+const catalogPage = document.getElementById('catalogPage');
 const libraryContent = document.getElementById('libraryContent');
 const librarySubtitle = document.getElementById('librarySubtitle');
 const libraryBadge = document.getElementById('libraryBadge');
@@ -23,9 +24,16 @@ const sidebarShows = document.getElementById('sidebarShows');
 const timingElapsed = document.getElementById('timingElapsed');
 const timingEta = document.getElementById('timingEta');
 const timingAvg = document.getElementById('timingAvg');
+const catalogGrid = document.getElementById('catalogGrid');
+const catalogSubtitle = document.getElementById('catalogSubtitle');
+const playerModal = document.getElementById('playerModal');
+const videoPlayer = document.getElementById('videoPlayer');
+const videoSource = document.getElementById('videoSource');
+const playerTitle = document.getElementById('playerTitle');
 
 let eventSource = null;
 let elapsedTimer = null;
+let catalogLoaded = false;
 
 // ─────────────────────────────────────────────
 // INIT
@@ -49,15 +57,15 @@ document.addEventListener('DOMContentLoaded', () => {
 // ─────────────────────────────────────────────
 function switchPage(page) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
-  if (page === 'download') {
-    downloadPage.classList.remove('hidden');
-    libraryPage.classList.remove('active');
-  } else {
-    downloadPage.classList.add('hidden');
-    libraryPage.classList.add('active');
-    loadLibrary();
-  }
+  const navItem = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (navItem) navItem.classList.add('active');
+  
+  downloadPage.style.display = page === 'download' ? 'block' : 'none';
+  catalogPage.classList.toggle('active', page === 'catalog');
+  libraryPage.classList.toggle('active', page === 'library');
+  
+  if (page === 'library') loadLibrary();
+  if (page === 'catalog' && !catalogLoaded) loadCatalog();
 }
 
 // ─────────────────────────────────────────────
@@ -216,7 +224,7 @@ async function loadLibrary() {
       const div = document.createElement('div');
       div.className = 'library-show';
       div.innerHTML = `
-        <div class="library-show-name">${show.showName}</div>
+        <div class="library-show-name">${show.displayName || show.showName}</div>
         <div class="library-show-meta">${show.episodeCount} פרקים • ${show.totalSize}</div>
       `;
       div.onclick = () => switchPage('library');
@@ -256,7 +264,7 @@ async function loadLibrary() {
           <div class="season-block">
             ${show.seasons.length > 1 ? `<div class="season-title">${seasonTitle} <span class="season-meta">${season.episodeCount} פרקים • ${season.totalSize} ${subStat}</span></div>` : ''}
             <div class="show-episodes-grid">
-              ${season.episodes.map(ep => `<div class="ep-chip" title="${ep.name} (${ep.size})">${ep.name.replace(/\.[^.]+$/, '')}</div>`).join('')}
+              ${season.episodes.map(ep => `<div class="ep-chip" title="${ep.name} (${ep.size})" onclick="event.stopPropagation(); playEpisode('${show.showName.replace(/'/g, "\\'")}', '${ep.name.replace(/'/g, "\\'")}')">${ep.name.replace(/\.[^.]+$/, '')}</div>`).join('')}
             </div>
           </div>`;
       }
@@ -265,7 +273,7 @@ async function loadLibrary() {
         <div class="show-card-header" onclick="this.parentElement.classList.toggle('expanded')">
           <div class="show-card-icon">🎬</div>
           <div class="show-card-info">
-            <div class="show-card-title">${show.showName}</div>
+            <div class="show-card-title">${formatDisplayName(show.displayName || show.showName)}</div>
             <div class="show-card-meta">${show.episodeCount} פרקים • ${show.totalSize}</div>
             <div class="show-card-subs">${subInfo}</div>
           </div>
@@ -622,6 +630,107 @@ function shake(el) {
   setTimeout(() => el.style.animation = '', 400);
 }
 
+// ─────────────────────────────────────────────
+// FORMAT DISPLAY NAME (Hebrew | Turkish)
+// ─────────────────────────────────────────────
+function formatDisplayName(name) {
+  if (name.includes('|')) {
+    const [he, tr] = name.split('|').map(s => s.trim());
+    return `<span class="show-display-hebrew">${he}</span><span class="show-display-sep">|</span><span class="show-display-turkish">${tr}</span>`;
+  }
+  return name;
+}
+
+// ─────────────────────────────────────────────
+// CATALOG
+// ─────────────────────────────────────────────
+async function loadCatalog() {
+  catalogGrid.innerHTML = `<div class="catalog-loading"><div class="spinner"></div><p>סורק את NowTV לחיפוש סדרות...</p></div>`;
+  catalogSubtitle.textContent = 'טוען קטלוג...';
+
+  try {
+    const resp = await fetch('/api/catalog');
+    const shows = await resp.json();
+    catalogLoaded = true;
+
+    catalogSubtitle.textContent = `${shows.length} סדרות זמינות`;
+    catalogGrid.innerHTML = '';
+
+    for (const show of shows) {
+      const card = document.createElement('div');
+      card.className = 'catalog-card';
+      card.onclick = () => selectCatalogShow(show);
+      card.innerHTML = `
+        <span class="catalog-card-site ${show.site}">${show.site === 'nowtv' ? 'NOW TV' : 'SHOW TV'}</span>
+        <img class="catalog-card-poster" src="${show.poster}" alt="${show.title}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 320 180%22><rect fill=%22%23333%22 width=%22320%22 height=%22180%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2224%22>📺</text></svg>'">
+        <div class="catalog-card-overlay"></div>
+        <div class="catalog-card-play">▶</div>
+        <div class="catalog-card-body">
+          <div class="catalog-card-title">${show.title}</div>
+          ${show.hebrewName ? `<div class="catalog-card-hebrew">${show.hebrewName}</div>` : ''}
+        </div>
+      `;
+      catalogGrid.appendChild(card);
+    }
+  } catch (err) {
+    catalogSubtitle.textContent = 'שגיאה בטעינת הקטלוג';
+    catalogGrid.innerHTML = `<p style="color: var(--red); padding: 20px;">שגיאה: ${err.message}</p>`;
+  }
+}
+
+function selectCatalogShow(show) {
+  // Switch to download page and pre-fill the URL
+  switchPage('download');
+
+  if (show.site === 'nowtv') {
+    // Convert /izle link to /bolum/1 format
+    const slug = show.slug || show.link.split('/').filter(Boolean).pop();
+    urlInput.value = `https://www.nowtv.com.tr/${slug}/bolum/1`;
+  } else {
+    urlInput.value = show.link;
+  }
+  fromEp.value = 1;
+  toEp.value = '';
+  urlInput.focus();
+}
+
+// ─────────────────────────────────────────────
+// VIDEO PLAYER
+// ─────────────────────────────────────────────
+function playEpisode(showName, fileName) {
+  const videoUrl = `/api/player/${encodeURIComponent(showName)}/${encodeURIComponent(fileName)}`;
+  const baseName = fileName.replace(/\.[^.]+$/, '');
+
+  videoSource.src = videoUrl;
+  videoPlayer.load();
+  playerTitle.textContent = `${showName} — ${baseName}`;
+
+  // Remove old subtitle tracks
+  videoPlayer.querySelectorAll('track').forEach(t => t.remove());
+
+  // Try to add VTT subtitles
+  const vttName = baseName + '.vtt';
+  const vttUrl = `/api/player/${encodeURIComponent(showName)}/${encodeURIComponent(vttName)}`;
+  const track = document.createElement('track');
+  track.kind = 'subtitles';
+  track.label = 'עברית';
+  track.srclang = 'he';
+  track.src = vttUrl;
+  track.default = true;
+  videoPlayer.appendChild(track);
+
+  playerModal.classList.add('active');
+  videoPlayer.play().catch(() => {});
+}
+
+function closePlayer() {
+  videoPlayer.pause();
+  videoSource.src = '';
+  videoPlayer.querySelectorAll('track').forEach(t => t.remove());
+  playerModal.classList.remove('active');
+}
+
 const style = document.createElement('style');
 style.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}`;
 document.head.appendChild(style);
+

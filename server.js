@@ -28,6 +28,54 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─────────────────────────────────────────────
+// SHOW NAME TRANSLATIONS (Turkish → Hebrew)
+// ─────────────────────────────────────────────
+const SHOW_NAMES = {
+  'yeralti':         { tr: 'Yeraltı',            he: 'העולם התחתון' },
+  'kizilcik-serbeti':{ tr: 'Kızılcık Şerbeti',   he: 'שרבט חמוציות' },
+  'esref-ruya':      { tr: 'Eşref Rüya',         he: 'החלום של אשרף' },
+  'emanet':          { tr: 'Emanet',              he: 'המנקשה וחליל' },
+  'yalancı':         { tr: 'Yalancı',             he: 'השקרן' },
+  'aldatmak':        { tr: 'Aldatmak',            he: 'בגידה' },
+  'sandik-kokusu':   { tr: 'Sandık Kokusu',       he: 'ריח הארגז' },
+  'gizli-kalsın':    { tr: 'Gizli Kalsın',        he: 'שישאר סוד' },
+  'gizli-bahce':     { tr: 'Gizli Bahçe',         he: 'הגן הסודי' },
+  'bambaska-biri':   { tr: 'Bambaşka Biri',       he: 'מישהו אחר לגמרי' },
+  'rüzgarlı-tepe':   { tr: 'Rüzgarlı Tepe',      he: 'גבעת הרוחות' },
+  'kuruluş-osman':   { tr: 'Kuruluş Osman',       he: 'עות\'מאן' },
+  'kirgin-cicekler': { tr: 'Kırgın Çiçekler',    he: 'פרחים שבורים' },
+  'kalp-yarası':     { tr: 'Kalp Yarası',         he: 'פצע בלב' },
+  'arıza':           { tr: 'Arıza',               he: 'התקלה' },
+  'üç-kız-kardeş':   { tr: 'Üç Kız Kardeş',      he: 'שלוש אחיות' },
+  'aile':            { tr: 'Aile',                he: 'המשפחה' },
+  'yargı':           { tr: 'Yargı',               he: 'משפט' },
+  'kan-çiçekleri':   { tr: 'Kan Çiçekleri',       he: 'פרחי דם' },
+  'hudutsuz-sevda':  { tr: 'Hudutsuz Sevda',      he: 'אהבה ללא גבולות' },
+  'kizil-goncalar':  { tr: 'Kızıl Goncalar',     he: 'ניצנים אדומים' },
+  'yabani':          { tr: 'Yabani',              he: 'הפראי' },
+  'leyla':           { tr: 'Leyla',               he: 'ליילה' },
+  'kirli-sepeti':    { tr: 'Kirli Sepeti',        he: 'סל הכביסה' },
+  'sahane-hayatim':  { tr: 'Şahane Hayatım',      he: 'החיים המופלאים שלי' },
+  'gaddar':          { tr: 'Gaddar',              he: 'האכזר' },
+};
+
+function getDisplayName(folderName) {
+  const key = folderName.toLowerCase().replace(/\s+/g, '-');
+  const entry = SHOW_NAMES[key];
+  if (entry) return `${entry.he} | ${entry.tr}`;
+  // Try partial match
+  for (const [k, v] of Object.entries(SHOW_NAMES)) {
+    if (key.includes(k) || k.includes(key)) return `${v.he} | ${v.tr}`;
+  }
+  // If folder name is Hebrew already, return as-is
+  if (/[\u0590-\u05FF]/.test(folderName)) return folderName;
+  return folderName;
+}
+
+// Serve video files for in-app player
+app.use('/media', express.static(DOWNLOADS_DIR));
+
+// ─────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────
 
@@ -626,6 +674,7 @@ app.get('/api/library', (req, res) => {
         });
         library.push({
           showName: show,
+          displayName: getDisplayName(show),
           episodeCount: totalEpisodes,
           totalSize: `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`,
           subtitlesTxt: totalTxt,
@@ -915,6 +964,112 @@ async function runTranslation(session) {
   });
   bc('log', { message: `\n🎉 תרגום הושלם! ${translated} קבצים ב-${formatDuration(totalTime)}` });
 }
+
+// ─────────────────────────────────────────────
+// NOWTV CATALOG SCRAPER
+// ─────────────────────────────────────────────
+
+let catalogCache = { data: null, time: 0 };
+
+app.get('/api/catalog', async (req, res) => {
+  // Cache for 1 hour
+  if (catalogCache.data && (Date.now() - catalogCache.time) < 3600000) {
+    return res.json(catalogCache.data);
+  }
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.goto('https://www.nowtv.com.tr/diziler', { waitUntil: 'networkidle2', timeout: 30000 });
+
+    const shows = await page.evaluate(() => {
+      const results = [];
+      const seen = new Set();
+      // Try multiple selectors
+      const links = document.querySelectorAll('a[href*="/izle"], a[href*="/bolum/"], .card-wrapper a, .card-link');
+      for (const a of links) {
+        const href = a.href;
+        if (!href || seen.has(href)) continue;
+
+        const img = a.querySelector('img');
+        const poster = img ? (img.getAttribute('data-src') || img.getAttribute('src') || '') : '';
+        const title = a.title || (a.querySelector('h3, .title, .show-title') || {}).textContent || (img ? img.alt : '') || '';
+
+        if (!title || !poster) continue;
+        seen.add(href);
+
+        // Extract show slug from URL
+        const m = href.match(/nowtv\.com\.tr\/([^/]+)/);
+        const slug = m ? m[1] : '';
+
+        results.push({ title: title.trim(), poster, link: href, slug, site: 'nowtv' });
+      }
+      return results;
+    });
+
+    await browser.close();
+
+    // Also add some ShowTV popular shows (hardcoded since ShowTV structure is different)
+    const showTVShows = [
+      { title: 'Kızılcık Şerbeti', poster: 'https://mo.ciner.com.tr/video/2024/09/22/ver1726988040/kizilcik-serbeti_320x180.jpg', link: 'https://www.showtv.com.tr/dizi/tum_bolumler/kizilcik-serbeti', slug: 'kizilcik-serbeti', site: 'showtv' },
+      { title: 'Aldatmak', poster: 'https://mo.ciner.com.tr/video/2024/10/20/ver1729434000/aldatmak_320x180.jpg', link: 'https://www.showtv.com.tr/dizi/tum_bolumler/aldatmak', slug: 'aldatmak', site: 'showtv' },
+    ];
+
+    // Add Hebrew names
+    const allShows = [...shows, ...showTVShows].map(s => {
+      const entry = SHOW_NAMES[s.slug?.toLowerCase()];
+      return {
+        ...s,
+        hebrewName: entry ? entry.he : null,
+        displayName: entry ? `${entry.he} | ${s.title}` : s.title
+      };
+    });
+
+    catalogCache = { data: allShows, time: Date.now() };
+    res.json(allShows);
+  } catch (err) {
+    if (browser) await browser.close();
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// VIDEO PLAYER API
+// ─────────────────────────────────────────────
+
+app.get('/api/player/:showName/:fileName', (req, res) => {
+  const filePath = path.join(DOWNLOADS_DIR, req.params.showName, req.params.fileName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+  const stat = fs.statSync(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeTypes = { '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.vtt': 'text/vtt', '.txt': 'text/plain' };
+  const mime = mimeTypes[ext] || 'application/octet-stream';
+
+  // Support range requests for video seeking
+  const range = req.headers.range;
+  if (range && (ext === '.mp4' || ext === '.mkv' || ext === '.webm')) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+    const chunkSize = end - start + 1;
+    const stream = fs.createReadStream(filePath, { start, end });
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': mime
+    });
+    stream.pipe(res);
+  } else {
+    res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': mime });
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
 
 // ─────────────────────────────────────────────
 // FIX ENCODING ENGINE (FFmpeg copy & rename)

@@ -21,6 +21,9 @@
       <div class="nav-item active" data-page="download" onclick="switchPage('download')">
         <span class="icon">⬇️</span> הורדה
       </div>
+      <div class="nav-item" data-page="catalog" onclick="switchPage('catalog')">
+        <span class="icon">📺</span> קטלוג NowTV
+      </div>
       <div class="nav-item" data-page="library" onclick="switchPage('library')">
         <span class="icon">📁</span> מאגר
         <span class="badge" id="libraryBadge" style="display:none">0</span>
@@ -39,7 +42,7 @@
           <div class="logo-icon">🎬</div>
           <div>
             <div class="page-title">NowTV Downloader</div>
-            <div class="page-subtitle">הורד פרקים וסדרות שלמות מ-NowTV</div>
+            <div class="page-subtitle">הורד פרקים וסדרות שלמות מ-NowTV ו-ShowTV</div>
           </div>
         </div>
 
@@ -126,6 +129,23 @@
         </div>
       </div>
 
+      <!-- CATALOG PAGE -->
+      <div class="catalog-page" id="catalogPage">
+        <div class="page-header">
+          <div class="logo-icon">📺</div>
+          <div>
+            <div class="page-title">קטלוג סדרות NowTV</div>
+            <div class="page-subtitle" id="catalogSubtitle">טוען קטלוג...</div>
+          </div>
+        </div>
+        <div class="catalog-grid" id="catalogGrid">
+          <div class="catalog-loading">
+            <div class="spinner"></div>
+            <p>סורק את NowTV לחיפוש סדרות...</p>
+          </div>
+        </div>
+      </div>
+
       <!-- LIBRARY PAGE -->
       <div class="library-page" id="libraryPage">
         <div class="page-header">
@@ -138,6 +158,22 @@
         <div id="libraryContent"></div>
       </div>
     </main>
+  </div>
+
+  <!-- Video Player Modal -->
+  <div class="player-modal" id="playerModal">
+    <div class="player-overlay" onclick="closePlayer()"></div>
+    <div class="player-panel">
+      <div class="player-header">
+        <h3 id="playerTitle">נגן וידאו</h3>
+        <button class="translate-close" onclick="closePlayer()">✕</button>
+      </div>
+      <div class="player-container">
+        <video id="videoPlayer" controls autoplay>
+          <source id="videoSource" src="" type="video/mp4">
+        </video>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
