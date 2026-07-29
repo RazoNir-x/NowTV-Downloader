@@ -109,6 +109,108 @@ function getPosterUrl(folderName) {
   return `https://fox-content.akamaized.net/m/series/${key}-poster.jpg`;
 }
 
+function generateSvgPoster(showFolder) {
+  const displayName = getDisplayName(showFolder);
+  let he = showFolder;
+  let tr = '';
+  if (displayName.includes('|')) {
+    const parts = displayName.split('|').map(s => s.trim());
+    he = parts[0];
+    tr = parts[1];
+  } else {
+    he = displayName;
+  }
+
+  const escapeXml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  he = escapeXml(he);
+  tr = escapeXml(tr);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="640" viewBox="0 0 360 640">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="50%" stop-color="#2e1065"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+    </filter>
+  </defs>
+
+  <rect width="360" height="640" fill="url(#bg)"/>
+  
+  <circle cx="180" cy="220" r="90" fill="#6366f1" opacity="0.3" filter="url(#glow)"/>
+  <circle cx="280" cy="400" r="70" fill="#a855f7" opacity="0.2" filter="url(#glow)"/>
+
+  <rect x="16" y="16" width="328" height="608" rx="16" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+
+  <circle cx="180" cy="220" r="50" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+  <text x="180" y="232" font-size="52" text-anchor="middle" dominant-baseline="middle">🎬</text>
+
+  <rect x="40" y="440" width="280" height="3" fill="url(#accent)" rx="1.5"/>
+
+  <text x="180" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="#ffffff" text-anchor="middle">${he}</text>
+  ${tr ? `<text x="180" y="525" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" font-weight="500" fill="#c084fc" text-anchor="middle">${tr}</text>` : ''}
+</svg>`;
+}
+
+// Poster proxy endpoint to bypass hotlink & CORS restrictions, with SVG poster fallback
+app.get('/api/poster-proxy', (req, res) => {
+  const showName = req.query.show;
+  if (!showName) return res.status(400).send('Missing show');
+
+  const serveSvgFallback = () => {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(generateSvgPoster(showName));
+  };
+
+  const imageUrl = getPosterUrl(showName);
+  if (!imageUrl || imageUrl.includes('akamaized.net')) {
+    return serveSvgFallback();
+  }
+
+  const client = imageUrl.startsWith('https') ? https : http;
+
+  const request = client.get(imageUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      'Referer': 'https://www.google.com/'
+    }
+  }, (response) => {
+    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+      const redirectClient = response.headers.location.startsWith('https') ? https : http;
+      redirectClient.get(response.headers.location, {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.google.com/' }
+      }, (redRes) => {
+        if (redRes.statusCode === 200) {
+          res.setHeader('Content-Type', redRes.headers['content-type'] || 'image/jpeg');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          redRes.pipe(res);
+        } else {
+          serveSvgFallback();
+        }
+      }).on('error', serveSvgFallback);
+      return;
+    }
+
+    if (response.statusCode === 200) {
+      res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      response.pipe(res);
+    } else {
+      serveSvgFallback();
+    }
+  });
+
+  request.on('error', serveSvgFallback);
+});
+
 // Serve video files for in-app player
 app.use('/media', express.static(DOWNLOADS_DIR));
 
@@ -712,7 +814,7 @@ app.get('/api/library', (req, res) => {
         library.push({
           showName: show,
           displayName: getDisplayName(show),
-          poster: getPosterUrl(show),
+          poster: `/api/poster-proxy?show=${encodeURIComponent(show)}`,
           episodeCount: totalEpisodes,
           totalSize: `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`,
           subtitlesTxt: totalTxt,
