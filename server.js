@@ -72,6 +72,22 @@ function getDisplayName(folderName) {
   return folderName;
 }
 
+// Poster URL lookup — uses NowTV CDN pattern or catalog cache
+function getPosterUrl(folderName) {
+  const key = folderName.toLowerCase().replace(/\s+/g, '-');
+  // Check catalog cache first
+  if (catalogCache.data) {
+    const match = catalogCache.data.find(s => 
+      s.slug?.toLowerCase() === key || 
+      s.title?.toLowerCase().replace(/\s+/g, '-') === key
+    );
+    if (match && match.poster) return match.poster;
+  }
+  // Try NowTV CDN pattern
+  const slug = key.charAt(0).toUpperCase() + key.slice(1);
+  return `https://fox-content.akamaized.net/m/series/${key}-poster.jpg`;
+}
+
 // Serve video files for in-app player
 app.use('/media', express.static(DOWNLOADS_DIR));
 
@@ -675,6 +691,7 @@ app.get('/api/library', (req, res) => {
         library.push({
           showName: show,
           displayName: getDisplayName(show),
+          poster: getPosterUrl(show),
           episodeCount: totalEpisodes,
           totalSize: `${(totalSize / (1024 * 1024 * 1024)).toFixed(2)} GB`,
           subtitlesTxt: totalTxt,

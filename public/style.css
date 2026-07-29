@@ -99,10 +99,15 @@ body {
 .sidebar-divider { height: 1px; background: var(--border); margin: 16px 0; }
 
 .library-show {
-  padding: 10px 12px; border-radius: var(--radius-xs);
-  cursor: pointer; transition: all 0.2s; margin-bottom: 2px;
+  padding: 8px 10px; border-radius: var(--radius-xs);
+  cursor: pointer; transition: all 0.2s; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px;
 }
 .library-show:hover { background: rgba(255,255,255,0.04); }
+.library-show-thumb {
+  width: 32px; height: 48px; border-radius: 4px;
+  object-fit: cover; flex-shrink: 0; background: #222;
+}
 .library-show-name { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
 .library-show-meta { font-size: 11px; color: var(--text-3); }
 
@@ -348,6 +353,11 @@ body {
   border-radius: 12px; display: flex; align-items: center;
   justify-content: center; font-size: 22px; flex-shrink: 0;
 }
+.show-card-poster {
+  width: 48px; height: 70px; border-radius: var(--radius-xs);
+  object-fit: cover; flex-shrink: 0; background: #222;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
 .show-card-info { flex: 1; min-width: 0; }
 .show-card-title { font-size: 16px; font-weight: 700; }
 .show-card-meta { font-size: 12px; color: var(--text-3); margin-top: 3px; }
@@ -512,7 +522,7 @@ body {
 .catalog-loading p { font-size: 14px; }
 
 .catalog-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  display: grid; grid-template-columns: repeat(5, 1fr);
   gap: 20px;
 }
 
@@ -526,7 +536,7 @@ body {
   box-shadow: 0 12px 40px rgba(99,102,241,0.15);
 }
 .catalog-card-poster {
-  width: 100%; aspect-ratio: 16/9; object-fit: cover;
+  width: 100%; aspect-ratio: 9/16; object-fit: cover;
   display: block; transition: transform 0.4s;
 }
 .catalog-card:hover .catalog-card-poster { transform: scale(1.05); }
@@ -612,6 +622,6 @@ body {
   .translate-panel { width: 95%; max-height: 90vh; }
   .show-card-header { flex-wrap: wrap; }
   .btn-translate { width: 100%; margin-top: 8px; text-align: center; }
-  .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .catalog-grid { grid-template-columns: repeat(3, 1fr); gap: 12px; }
   .player-panel { width: 98%; }
 }

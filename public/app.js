@@ -223,9 +223,13 @@ async function loadLibrary() {
     for (const show of library) {
       const div = document.createElement('div');
       div.className = 'library-show';
+      const posterSrc = show.poster || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2240%22>🎬</text></svg>';
       div.innerHTML = `
-        <div class="library-show-name">${show.displayName || show.showName}</div>
-        <div class="library-show-meta">${show.episodeCount} פרקים • ${show.totalSize}</div>
+        <img class="library-show-thumb" src="${posterSrc}" alt="${show.showName}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2240%22>🎬</text></svg>'">
+        <div>
+          <div class="library-show-name">${show.displayName || show.showName}</div>
+          <div class="library-show-meta">${show.episodeCount} פרקים • ${show.totalSize}</div>
+        </div>
       `;
       div.onclick = () => switchPage('library');
       sidebarShows.appendChild(div);
@@ -269,9 +273,11 @@ async function loadLibrary() {
           </div>`;
       }
 
+      const posterSrc = show.poster || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2240%22>🎬</text></svg>';
+
       card.innerHTML = `
         <div class="show-card-header" onclick="this.parentElement.classList.toggle('expanded')">
-          <div class="show-card-icon">🎬</div>
+          <img class="show-card-poster" src="${posterSrc}" alt="${show.showName}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2240%22>🎬</text></svg>'">
           <div class="show-card-info">
             <div class="show-card-title">${formatDisplayName(show.displayName || show.showName)}</div>
             <div class="show-card-meta">${show.episodeCount} פרקים • ${show.totalSize}</div>
