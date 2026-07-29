@@ -281,14 +281,7 @@ function episodeExists(showName, episode) {
   const showDir = path.join(DOWNLOADS_DIR, showName);
   if (!fs.existsSync(showDir)) return false;
   
-  const epStr = String(episode).padStart(2, '0');
-  // Search recursively for any video file matching the episode
-  const patterns = [
-    `E${epStr}`, `E${episode}`, 
-    `_${epStr}.`, `_${episode}.`,
-    `Episode ${episode}`, `episode_${episode}`,
-    `פרק ${episode}`, `פרק_${episode}`
-  ];
+  const epNum = parseInt(episode, 10);
 
   function searchDir(dir) {
     try {
@@ -301,8 +294,14 @@ function episodeExists(showName, episode) {
         } else {
           const ext = path.extname(item).toLowerCase();
           if (['.mp4', '.mkv', '.ts', '.avi', '.webm'].includes(ext)) {
-            for (const pattern of patterns) {
-              if (item.includes(pattern)) return true;
+            const base = path.basename(item, ext);
+            // Extract all numbers preceded by E, _, space or start of string
+            const matches = base.match(/(?:E|_|episode|פרק|\b)0*(\d+)(?!\d)/gi);
+            if (matches) {
+              for (const m of matches) {
+                const numStr = m.match(/\d+/)[0];
+                if (parseInt(numStr, 10) === epNum) return true;
+              }
             }
           }
         }
