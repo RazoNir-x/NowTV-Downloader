@@ -72,10 +72,32 @@ function getDisplayName(folderName) {
   return folderName;
 }
 
-// Poster URL lookup — uses NowTV CDN pattern or catalog cache
+const SHOW_POSTERS = {
+  'kizilcik-serbeti': 'https://mo.ciner.com.tr/video/2024/09/22/ver1726988040/kizilcik-serbeti_320x180.jpg',
+  'yeralti':          'https://m.media-amazon.com/images/M/MV5BNzVjZDM3MTItNDlhYS00YWIwLWI4ODUtNTQ5NTlhNmE5ZmVlXkEyXkFqcGc@._V1_.jpg',
+  'מנקשה וחליל':      'https://m.media-amazon.com/images/M/MV5BMzU4NDc0ODQtYWMyNS00YTZmLWI4OGEtMmM3ZmUzOGFhYTAzXkEyXkFqcGc@._V1_.jpg',
+  'bambaska-biri':    'https://m.media-amazon.com/images/M/MV5BMjA1NmU3MjctYjI4Yi00ZjJhLWE3NDEtYTQ1OWE2NmIzNmFjXkEyXkFqcGc@._V1_.jpg',
+  'gizli-bahce':      'https://mo.ciner.com.tr/video/2024/10/13/ver1728825000/gizli-bahce_320x180.jpg',
+  'esref-ruya':       'https://m.media-amazon.com/images/M/MV5BZDU1NmUyZjYtMDlhOS00NDI5LWEzZjctYTlhNWQ4NmNlODlhXkEyXkFqcGc@._V1_.jpg',
+  'emanet':           'https://m.media-amazon.com/images/M/MV5BNWE1Y2QxZWMtMzAyNy00NDQ0LWI0NWYtNTNmOWUxMWMyZDUxXkEyXkFqcGc@._V1_.jpg',
+  'aldatmak':         'https://mo.ciner.com.tr/video/2024/10/20/ver1729434000/aldatmak_320x180.jpg',
+  'hudutsuz-sevda':   'https://fox-content.akamaized.net/m/series/hudutsuz-sevda-poster.jpg',
+  'kizil-goncalar':   'https://fox-content.akamaized.net/m/series/kizil-goncalar-poster.jpg',
+  'yabani':           'https://fox-content.akamaized.net/m/series/yabani-poster.jpg',
+  'leyla':            'https://fox-content.akamaized.net/m/series/leyla-poster.jpg'
+};
+
 function getPosterUrl(folderName) {
-  const key = folderName.toLowerCase().replace(/\s+/g, '-');
-  // Check catalog cache first
+  const key = folderName.toLowerCase().trim().replace(/\s+/g, '-');
+  if (SHOW_POSTERS[folderName]) return SHOW_POSTERS[folderName];
+  if (SHOW_POSTERS[key]) return SHOW_POSTERS[key];
+  
+  // Try partial key matching
+  for (const [k, url] of Object.entries(SHOW_POSTERS)) {
+    if (key.includes(k) || k.includes(key)) return url;
+  }
+
+  // Check catalog cache
   if (catalogCache.data) {
     const match = catalogCache.data.find(s => 
       s.slug?.toLowerCase() === key || 
@@ -83,8 +105,7 @@ function getPosterUrl(folderName) {
     );
     if (match && match.poster) return match.poster;
   }
-  // Try NowTV CDN pattern
-  const slug = key.charAt(0).toUpperCase() + key.slice(1);
+
   return `https://fox-content.akamaized.net/m/series/${key}-poster.jpg`;
 }
 
