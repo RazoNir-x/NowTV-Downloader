@@ -349,7 +349,11 @@ async function captureStreamUrls(pageUrl, broadcastFn) {
     });
 
     broadcastFn('log', { message: `📄 נכנס לדף: ${pageUrl}` });
-    await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    try {
+      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    } catch (e) {
+      broadcastFn('log', { message: `⚠️ טעינת עמוד חלקית: ${e.message}` });
+    }
 
     // Cookie consent
     for (const sel of ['#onetrust-accept-btn-handler', '.onetrust-close-btn-handler']) {
@@ -522,7 +526,11 @@ async function scrapeShowTVEpisodes(pageUrl, fromEp, toEp, broadcastFn) {
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security']
     });
     const page = await browser.newPage();
-    await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    try {
+      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    } catch (e) {
+      broadcastFn('log', { message: `⚠️ טעינת עמוד חלקית בסריקה: ${e.message}` });
+    }
 
     const episodeUrls = new Map(); // ep -> url
 
@@ -542,7 +550,7 @@ async function scrapeShowTVEpisodes(pageUrl, fromEp, toEp, broadcastFn) {
              const m2 = href.match(/-bolum-(\d+)/i);
              if (m2) epNum = parseInt(m2[1]);
           }
-          if (epNum) results[epNum] = href;
+          if (epNum && href) results[epNum] = href;
         }
         return results;
       });
@@ -620,7 +628,11 @@ async function runBatchDownload(session) {
 
   // Helper to get exact URL for an episode
   function getEpisodeUrl(epNum) {
-    if (site === 'showtv') return resolvedUrls.get(epNum) || null;
+    if (site === 'showtv') {
+      if (resolvedUrls.has(epNum)) return resolvedUrls.get(epNum);
+      if (url.includes(`-bolum-${epNum}-`)) return url;
+      return null;
+    }
     return buildEpisodeUrl(url, epNum);
   }
 
