@@ -330,6 +330,26 @@ async function captureStreamUrls(pageUrl, broadcastFn) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
 
+    // Block video ads to trigger main media stream instantly
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const url = req.url();
+      if (
+        url.includes('doubleclick.net') ||
+        url.includes('googleads') ||
+        url.includes('2mdn.net') ||
+        url.includes('googlesyndication') ||
+        url.includes('securepubads') ||
+        url.includes('taboola') ||
+        url.includes('outbrain') ||
+        url.includes('web_video_ads')
+      ) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     let m3u8Url = null;
     let vttUrl = null;
 
@@ -338,9 +358,12 @@ async function captureStreamUrls(pageUrl, broadcastFn) {
 
     cdp.on('Network.requestWillBeSent', (params) => {
       const reqUrl = params.request.url;
-      if (reqUrl.includes('.m3u8') && !m3u8Url) {
+      const isMediaStream = reqUrl.includes('.m3u8') || 
+        (reqUrl.includes('ciner.com.tr') && reqUrl.includes('.mp4') && !reqUrl.includes('web_video_ads'));
+
+      if (isMediaStream && !m3u8Url) {
         m3u8Url = reqUrl;
-        broadcastFn('log', { message: `✅ נמצא וידאו: ...${reqUrl.split('?')[0].slice(-30)}` });
+        broadcastFn('log', { message: `✅ נמצא וידאו: ...${reqUrl.split('?')[0].slice(-35)}` });
       }
       if (reqUrl.includes('.vtt') && !vttUrl) {
         vttUrl = reqUrl;
